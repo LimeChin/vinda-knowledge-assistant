@@ -149,6 +149,7 @@ function detectDomains(question) {
   if (/ClickHouse|Kafka|定时任务|XXL|实时同步|缓存/i.test(question)) domains.add("第三方接口任务调度与数据同步");
   if (/费用核销|ConfM891|活动反馈|图片上传/i.test(question)) domains.add("费用核销与活动反馈");
   if (/课程|考试|补考|成绩|试卷|题库|每周一测|课件|学习完成|内容库/.test(question)) domains.add("学习考试与内容库");
+  if (/消息|通知|短信|邮件|验证码|模板|收件人|网易云信|微信|钉钉/.test(question)) domains.add("消息通知与渠道");
   return domains;
 }
 
