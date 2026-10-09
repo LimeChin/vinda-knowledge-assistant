@@ -165,12 +165,27 @@ function bigrams(value) {
   return result;
 }
 
+const weakSignals = new Set(["活动", "数据", "任务", "同步", "接口", "报表", "订单", "门店", "消息", "通知", "账号", "审批", "流程", "状态", "图片", "用户", "权限"]);
+
+function hasStrongSignal(question, item) {
+  const query = normalize(question);
+  const title = normalize(item.title);
+  if (query.includes(title) || (query.length >= 6 && title.includes(query))) return true;
+  if (detectDomains(question).has(item.domain)) return true;
+  const terms = [...new Set([...(item.keywords || []), ...(item.aliases || [])])];
+  return terms.some((term) => {
+    const word = normalize(term);
+    return word.length >= 2 && !weakSignals.has(word) && query.includes(word);
+  });
+}
+
 function score(question, item) {
   const query = normalize(question);
   const queryPairs = bigrams(question);
   if (item.exclude?.some((term) => includesTerm(question, term))) return Number.NEGATIVE_INFINITY;
   if (item.mustAll?.length && !item.mustAll.every((term) => includesTerm(question, term))) return Number.NEGATIVE_INFINITY;
   if (item.mustAny?.length && !item.mustAny.some((term) => includesTerm(question, term))) return Number.NEGATIVE_INFINITY;
+  if (!hasStrongSignal(question, item)) return Number.NEGATIVE_INFINITY;
   let total = 0;
   const searchTerms = [...new Set([...(item.keywords || []), ...(item.aliases || [])])];
   for (const keyword of searchTerms) {
