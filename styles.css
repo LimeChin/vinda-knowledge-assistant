@@ -164,13 +164,35 @@ h1 { margin: 18px 0 8px; font-size: clamp(30px, 8vw, 40px); line-height: 1.15; l
 }
 
 .answer-level { color: #08766f; font-size: 14px; font-weight: 750; }
-.answer-text { margin: 12px 0 0; font-size: 16px; line-height: 1.8; }
+.answer-text { margin: 12px 0 0; font-size: 16px; line-height: 1.8; white-space: pre-line; }
 .context-box { margin-top: 16px; padding: 13px 14px; border-left: 3px solid #d49a35; border-radius: 8px; background: #fff8e9; color: #5d4b2a; line-height: 1.6; }
 .context-box strong { display: block; margin-bottom: 3px; font-size: 14px; }
 details { margin-top: 16px; padding-top: 14px; border-top: 1px solid #e5ecea; color: #5d716f; }
 details ul { padding-left: 20px; line-height: 1.6; }
 .related-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .related-label { width: 100%; color: #83918f; font-size: 13px; }
+.feedback-row { display: flex; justify-content: flex-end; margin-top: 14px; }
+.feedback-button, .copy-button {
+  border: 1px solid #d2dfdd;
+  border-radius: 12px;
+  padding: 8px 12px;
+  background: #f8fbfa;
+  color: #5d716f;
+}
+.feedback-button:hover, .copy-button:hover { border-color: #087d78; color: #087d78; }
+.escalation-box {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid #ead8b4;
+  border-radius: 14px;
+  background: #fffaf0;
+  color: #5d4b2a;
+  line-height: 1.6;
+}
+.escalation-box[hidden] { display: none; }
+.escalation-box strong { display: block; }
+.escalation-box p { margin: 4px 0 10px; }
+.copy-button { background: #fff; color: #08766f; }
 
 .composer-wrap {
   position: fixed;

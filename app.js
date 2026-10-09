@@ -8,6 +8,11 @@ const starters = [
 
 let encryptedBundle;
 let knowledgeItems = [];
+let conversationContext = {
+  lastQuestion: "",
+  lastDomain: "",
+  lastTitle: "",
+};
 
 const escapeHtml = (value = "") => String(value).replace(/[&<>"']/g, (char) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;",
@@ -94,7 +99,7 @@ function renderChat() {
       <div class="composer-wrap">
         <form class="composer" id="question-form">
           <div class="input-row"><textarea class="question-input" id="question" rows="1" placeholder="例如：为什么这个员工看不到今天的拜访计划？"></textarea><button class="send-button" id="send-button" type="submit" disabled aria-label="发送">↑</button></div>
-          <p class="baseline">知识基线 2026-10-09 · 重要操作请带环境与单号复核</p>
+          <p class="baseline">70 条已蒸馏知识 · 重要操作请带环境与单号复核</p>
         </form>
       </div>
     </section>`;
@@ -125,6 +130,34 @@ function normalize(value) {
   return value.toLowerCase().replace(/[\s，。？！、：；,.?!:;（）()\[\]【】_-]+/g, "");
 }
 
+function includesTerm(question, term) {
+  return normalize(question).includes(normalize(term));
+}
+
+function detectDomains(question) {
+  const domains = new Set();
+  if (/海外|台湾|韩国|erp|税码|收单地址|收货地址/i.test(question)) domains.add("海外App与海外订单");
+  if (/订单管理|已处理|未处理|待业务员|销管|订单页签/.test(question) && !/海外|台湾|韩国/i.test(question)) domains.add("国内订单与订单管理");
+  if (/拜访|路线|轨迹|进店|离店|未访|非拜访/.test(question)) domains.add("拜访计划路线轨迹与进离店");
+  if (/日报|排班|考勤|签到|签退|迟到|早退|请假|销量/.test(question)) domains.add("日报排班考勤请假与销量");
+  if (/TPM|促销|预算|返利|核销|活动方案/i.test(question)) domains.add("TPM活动审批核销与报表");
+  if (/MFA|主数据|门店编码|货架品牌|经销商关系/i.test(question)) domains.add("门店主数据与MFA");
+  if (/报表|配置中心|流程中心|导出/.test(question)) domains.add("动态报表与配置功能");
+  if (/审批人|审批节点|候选人|组织权限|数据权限/.test(question)) domains.add("审批与组织权限");
+  if (/登录|LDAP|OpenID|账号|经销商门户/i.test(question)) domains.add("账号与登录");
+  if (/积分|M947/.test(question)) domains.add("拜访与积分");
+  if (/ClickHouse|Kafka|定时任务|XXL|实时同步|缓存/i.test(question)) domains.add("第三方接口任务调度与数据同步");
+  if (/费用核销|ConfM891|活动反馈|图片上传/i.test(question)) domains.add("费用核销与活动反馈");
+  return domains;
+}
+
+function isFollowUp(question) {
+  const compact = normalize(question);
+  const explicitFollowUp = /^(那|这个|那个|我说的是|我想问的是|刚才|继续|还有|是不是|对了)/.test(question.trim());
+  const shortReference = compact.length <= 8 && !/(为什么|怎么|如何|哪里|什么|哪个|多少)/.test(question);
+  return explicitFollowUp || shortReference;
+}
+
 function bigrams(value) {
   const clean = normalize(value);
   const result = new Set();
@@ -135,8 +168,12 @@ function bigrams(value) {
 function score(question, item) {
   const query = normalize(question);
   const queryPairs = bigrams(question);
+  if (item.exclude?.some((term) => includesTerm(question, term))) return Number.NEGATIVE_INFINITY;
+  if (item.mustAll?.length && !item.mustAll.every((term) => includesTerm(question, term))) return Number.NEGATIVE_INFINITY;
+  if (item.mustAny?.length && !item.mustAny.some((term) => includesTerm(question, term))) return Number.NEGATIVE_INFINITY;
   let total = 0;
-  for (const keyword of item.keywords) {
+  const searchTerms = [...new Set([...(item.keywords || []), ...(item.aliases || [])])];
+  for (const keyword of searchTerms) {
     const word = normalize(keyword);
     if (query.includes(word)) total += Math.max(9, word.length * 3);
     for (const pair of bigrams(word)) if (queryPairs.has(pair)) total += 1;
@@ -144,24 +181,54 @@ function score(question, item) {
   const title = normalize(item.title);
   if (query.includes(title) || title.includes(query)) total += 12;
   for (const pair of bigrams(title)) if (queryPairs.has(pair)) total += 1;
+  const detectedDomains = detectDomains(question);
+  if (detectedDomains.size && item.domain) {
+    total += detectedDomains.has(item.domain) ? 14 : -10;
+  }
+  if (total > 0) total += Math.min(5, Math.floor((item.priority || 0) / 10));
   return total;
 }
 
 function answerQuestion(question) {
-  const ranked = knowledgeItems.map((item) => ({ item, score: score(question, item) })).sort((a, b) => b.score - a.score);
+  const effectiveQuestion = isFollowUp(question) && conversationContext.lastQuestion
+    ? `${conversationContext.lastQuestion} ${conversationContext.lastDomain} ${conversationContext.lastTitle} ${question}`
+    : question;
+  const ranked = knowledgeItems
+    .map((item) => ({ item, score: score(effectiveQuestion, item) }))
+    .filter((entry) => Number.isFinite(entry.score))
+    .sort((a, b) => b.score - a.score);
   const best = ranked[0];
-  if (!best || best.score < 5) {
+  const second = ranked[1];
+  if (!best || best.score < 14) {
     return {
       answer: "目前没有定位到足够明确的知识条目。请补充业务域、环境、用户或单号和页面现象。",
       level: "待补充问题",
       sources: [],
-      related: starters.slice(0, 3),
+      related: ranked.slice(0, 3).map((entry) => entry.item.title),
       needsContext: "业务域、环境、用户或单号、发生时间、页面提示。",
+      matched: false,
+      effectiveQuestion,
+    };
+  }
+  if (second && best.item.domain !== second.item.domain && best.score - second.score < 3) {
+    return {
+      answer: `我找到了两个接近的方向：${best.item.domain}和${second.item.domain}，现在还不能安全地替你选择。请补充具体页面名称或业务入口。`,
+      level: "需要确认业务范围",
+      sources: [],
+      related: ranked.slice(0, 3).map((entry) => entry.item.title),
+      needsContext: "页面名称、PC/App 入口，以及你看到的页签或状态名称。",
+      matched: false,
+      effectiveQuestion,
     };
   }
   const related = [...(best.item.related || []), ...ranked.slice(1, 3).filter((entry) => entry.score >= 5).map((entry) => entry.item.title)]
     .filter((value, index, array) => array.indexOf(value) === index).slice(0, 3);
-  return { ...best.item, related };
+  conversationContext = {
+    lastQuestion: question,
+    lastDomain: best.item.domain || "",
+    lastTitle: best.item.title,
+  };
+  return { ...best.item, related, matched: true, score: best.score, effectiveQuestion };
 }
 
 function showAnswer(question) {
@@ -179,9 +246,29 @@ function showAnswer(question) {
       ${result.needsContext ? `<div class="context-box"><strong>继续确认需要</strong>${escapeHtml(result.needsContext)}</div>` : ""}
       ${result.sources?.length ? `<details><summary>查看依据</summary><ul>${result.sources.map((source) => `<li>${escapeHtml(source)}</li>`).join("")}</ul></details>` : ""}
       ${result.related?.length ? `<div class="related-row"><span class="related-label">相关问题</span>${result.related.map((item) => `<button class="related-button" type="button">${escapeHtml(item)}</button>`).join("")}</div>` : ""}
+      <div class="feedback-row"><button class="feedback-button" type="button">没有解决</button></div>
+      <div class="escalation-box" hidden>
+        <strong>转人工前请补齐这些信息</strong>
+        <p>环境、账号或订单号、发生时间、页面名称和截图。</p>
+        <button class="copy-button" type="button">复制问题模板</button>
+      </div>
     </div>`;
   conversation.appendChild(message);
   message.querySelectorAll(".related-button").forEach((button) => button.addEventListener("click", () => showAnswer(button.textContent.trim())));
+  const escalation = message.querySelector(".escalation-box");
+  message.querySelector(".feedback-button").addEventListener("click", () => {
+    escalation.hidden = !escalation.hidden;
+  });
+  message.querySelector(".copy-button").addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    const text = `维达助手未解决问题\n原问题：${question}\n助手匹配：${result.title || "未匹配"}\n环境：\n账号/订单号：\n发生时间：\n页面现象：`;
+    try {
+      await navigator.clipboard.writeText(text);
+      button.textContent = "已复制，可以发给负责人";
+    } catch {
+      button.textContent = "复制失败，请截屏反馈";
+    }
+  });
   requestAnimationFrame(() => window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }));
 }
 
