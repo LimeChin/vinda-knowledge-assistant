@@ -99,7 +99,7 @@ function renderChat() {
       <div class="composer-wrap">
         <form class="composer" id="question-form">
           <div class="input-row"><textarea class="question-input" id="question" rows="1" placeholder="例如：为什么这个员工看不到今天的拜访计划？"></textarea><button class="send-button" id="send-button" type="submit" disabled aria-label="发送">↑</button></div>
-          <p class="baseline">70 条已蒸馏知识 · 重要操作请带环境与单号复核</p>
+          <p class="baseline">${knowledgeItems.length} 条已蒸馏知识 · 重要操作请带环境与单号复核</p>
         </form>
       </div>
     </section>`;
@@ -148,6 +148,7 @@ function detectDomains(question) {
   if (/积分|M947/.test(question)) domains.add("拜访与积分");
   if (/ClickHouse|Kafka|定时任务|XXL|实时同步|缓存/i.test(question)) domains.add("第三方接口任务调度与数据同步");
   if (/费用核销|ConfM891|活动反馈|图片上传/i.test(question)) domains.add("费用核销与活动反馈");
+  if (/课程|考试|补考|成绩|试卷|题库|每周一测|课件|学习完成|内容库/.test(question)) domains.add("学习考试与内容库");
   return domains;
 }
 
