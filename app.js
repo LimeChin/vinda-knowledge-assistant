@@ -154,10 +154,8 @@ function detectDomains(question) {
 }
 
 function isFollowUp(question) {
-  const compact = normalize(question);
   const explicitFollowUp = /^(那|这个|那个|我说的是|我想问的是|刚才|继续|还有|是不是|对了)/.test(question.trim());
-  const shortReference = compact.length <= 8 && !/(为什么|怎么|如何|哪里|什么|哪个|多少)/.test(question);
-  return explicitFollowUp || shortReference;
+  return explicitFollowUp;
 }
 
 function bigrams(value) {
