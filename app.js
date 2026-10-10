@@ -89,7 +89,7 @@ function renderChat() {
   app.innerHTML = `
     <section class="chat-shell">
       <header class="chat-header">
-        <div class="header-brand"><div class="brand-icon" aria-hidden="true">✣</div><div><strong>维达知识助手</strong><small>AI + 代码知识库</small></div></div>
+        <div class="header-brand"><div class="brand-icon" aria-hidden="true">✣</div><div><strong>维达知识助手</strong><small id="connection-status">AI 增强连接中</small></div></div>
         <span class="internal-badge">内部使用</span>
       </header>
       <div class="conversation" id="conversation">
@@ -310,9 +310,13 @@ async function showAnswer(question) {
   let result;
   try {
     result = await askAi(question);
+    const status = document.querySelector("#connection-status");
+    if (status) status.textContent = "AI + 代码知识库";
   } catch {
     result = answerQuestion(question);
     result.level = `${result.level} · AI 暂不可用`;
+    const status = document.querySelector("#connection-status");
+    if (status) status.textContent = "代码知识库已连接 · AI 暂不可用";
   }
   renderAnswerCard(message, question, result);
   requestAnimationFrame(() => window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }));
