@@ -1,5 +1,5 @@
 const app = document.querySelector("#app");
-const AI_ENDPOINT = "https://vinda-knowledge-assistant.briskhen1.chatgpt.site/api/public-ask";
+const AI_BASE_URL = "https://vinda-knowledge-api.pages.dev";
 const starters = [
   "为什么今天没有生成拜访计划？",
   "海外订单为什么一直是 ERP 处理中？",
@@ -9,7 +9,8 @@ const starters = [
 
 let encryptedBundle;
 let knowledgeItems = [];
-let accessCode = "";
+let aiToken = "";
+let aiSessionPromise = null;
 let conversationContext = {
   lastQuestion: "",
   lastDomain: "",
@@ -57,7 +58,7 @@ function renderUnlock() {
         <input class="code-input" id="access-code" autocomplete="off" autocapitalize="characters" placeholder="请输入邀请码" />
         <button class="primary-button" id="unlock-button" type="submit">进入助手</button>
         <p class="error" id="unlock-error" role="alert"></p>
-        <p class="privacy-note">知识内容已加密保存；验证只在当前手机浏览器中完成，不会上传邀请码。</p>
+        <p class="privacy-note">知识内容已加密保存；邀请码仅用于建立安全会话，不会写入网页或 GitHub。</p>
       </form>
     </section>`;
 
@@ -74,8 +75,9 @@ function renderUnlock() {
     error.textContent = "";
     try {
       knowledgeItems = await decryptKnowledge(code);
-      accessCode = code;
       renderChat();
+      aiSessionPromise = startAiSession(code).catch(() => undefined);
+      input.value = "";
     } catch {
       error.textContent = "邀请码不正确，请重新输入。";
       input.select();
@@ -250,16 +252,43 @@ function answerQuestion(question) {
 }
 
 async function askAi(question) {
-  const response = await fetch(AI_ENDPOINT, {
+  if (aiSessionPromise) await aiSessionPromise;
+  if (!aiToken) throw new Error("AI session unavailable");
+  const response = await fetch(`${AI_BASE_URL}/ask`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ code: accessCode, question }),
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${aiToken}`,
+    },
+    body: JSON.stringify({ question }),
   });
   const contentType = response.headers.get("content-type") || "";
   if (!contentType.includes("application/json")) throw new Error("AI service unavailable");
   const result = await response.json();
   if (!response.ok || !result.answer) throw new Error(result.error || "AI request failed");
   return result;
+}
+
+async function startAiSession(code) {
+  try {
+    const response = await fetch(`${AI_BASE_URL}/session`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code }),
+    });
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) throw new Error("AI service unavailable");
+    const result = await response.json();
+    if (!response.ok || !result.token) throw new Error(result.error || "AI session failed");
+    aiToken = result.token;
+    const status = document.querySelector("#connection-status");
+    if (status) status.textContent = "AI + 代码知识库";
+  } catch (error) {
+    aiToken = "";
+    const status = document.querySelector("#connection-status");
+    if (status) status.textContent = "代码知识库已连接 · AI 暂不可用";
+    throw error;
+  }
 }
 
 function renderAnswerCard(message, question, result) {
