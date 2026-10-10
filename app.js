@@ -205,7 +205,7 @@ function score(question, item) {
   if (detectedDomains.size && item.domain) {
     total += detectedDomains.has(item.domain) ? 14 : -10;
   }
-  if (total > 0) total += Math.min(5, Math.floor((item.priority || 0) / 10));
+  if (total > 0) total += Math.max(-50, Math.min(5, Math.floor((item.priority || 0) / 10)));
   return total;
 }
 
@@ -292,11 +292,11 @@ async function startAiSession(code) {
 }
 
 function renderAnswerCard(message, question, result) {
+  const businessAnswer = limitSentences(result.answer, 3);
   message.querySelector(".answer-card").innerHTML = `
     <div class="answer-level">◉ ${escapeHtml(result.level)}</div>
-    <p class="answer-text">${escapeHtml(result.answer)}</p>
+    <p class="answer-text">${escapeHtml(businessAnswer)}</p>
     ${result.needsContext ? `<div class="context-box"><strong>继续确认需要</strong>${escapeHtml(result.needsContext)}</div>` : ""}
-    ${result.sources?.length ? `<details><summary>查看依据</summary><ul>${result.sources.map((source) => `<li>${escapeHtml(source)}</li>`).join("")}</ul></details>` : ""}
     ${result.related?.length ? `<div class="related-row"><span class="related-label">相关问题</span>${result.related.map((item) => `<button class="related-button" type="button">${escapeHtml(item)}</button>`).join("")}</div>` : ""}
     <div class="feedback-row"><button class="feedback-button" type="button">没有解决</button></div>
     <div class="escalation-box" hidden>
@@ -319,6 +319,12 @@ function renderAnswerCard(message, question, result) {
       button.textContent = "复制失败，请截屏反馈";
     }
   });
+}
+
+function limitSentences(value, limit) {
+  const normalized = String(value || "").replace(/\s+/g, " ").replace(/•\s*/g, "").trim();
+  const sentences = normalized.match(/[^。！？!?]+[。！？!?]?/g) || [];
+  return sentences.slice(0, limit).join("").trim() || normalized;
 }
 
 async function showAnswer(question) {
