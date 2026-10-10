@@ -1,4 +1,5 @@
 const app = document.querySelector("#app");
+const AI_ENDPOINT = "https://vinda-knowledge-assistant.briskhen1.chatgpt.site/api/public-ask";
 const starters = [
   "为什么今天没有生成拜访计划？",
   "海外订单为什么一直是 ERP 处理中？",
@@ -8,6 +9,7 @@ const starters = [
 
 let encryptedBundle;
 let knowledgeItems = [];
+let accessCode = "";
 let conversationContext = {
   lastQuestion: "",
   lastDomain: "",
@@ -72,6 +74,7 @@ function renderUnlock() {
     error.textContent = "";
     try {
       knowledgeItems = await decryptKnowledge(code);
+      accessCode = code;
       renderChat();
     } catch {
       error.textContent = "邀请码不正确，请重新输入。";
@@ -86,7 +89,7 @@ function renderChat() {
   app.innerHTML = `
     <section class="chat-shell">
       <header class="chat-header">
-        <div class="header-brand"><div class="brand-icon" aria-hidden="true">✣</div><div><strong>维达知识助手</strong><small>代码知识已连接</small></div></div>
+        <div class="header-brand"><div class="brand-icon" aria-hidden="true">✣</div><div><strong>维达知识助手</strong><small>AI + 代码知识库</small></div></div>
         <span class="internal-badge">内部使用</span>
       </header>
       <div class="conversation" id="conversation">
@@ -246,29 +249,32 @@ function answerQuestion(question) {
   return { ...best.item, related, matched: true, score: best.score, effectiveQuestion };
 }
 
-function showAnswer(question) {
-  const welcome = document.querySelector("#welcome");
-  if (welcome) welcome.remove();
-  const result = answerQuestion(question);
-  const conversation = document.querySelector("#conversation");
-  const message = document.createElement("article");
-  message.className = "message";
-  message.innerHTML = `
-    <div class="question-bubble">${escapeHtml(question)}</div>
-    <div class="answer-card">
-      <div class="answer-level">◉ ${escapeHtml(result.level)}</div>
-      <p class="answer-text">${escapeHtml(result.answer)}</p>
-      ${result.needsContext ? `<div class="context-box"><strong>继续确认需要</strong>${escapeHtml(result.needsContext)}</div>` : ""}
-      ${result.sources?.length ? `<details><summary>查看依据</summary><ul>${result.sources.map((source) => `<li>${escapeHtml(source)}</li>`).join("")}</ul></details>` : ""}
-      ${result.related?.length ? `<div class="related-row"><span class="related-label">相关问题</span>${result.related.map((item) => `<button class="related-button" type="button">${escapeHtml(item)}</button>`).join("")}</div>` : ""}
-      <div class="feedback-row"><button class="feedback-button" type="button">没有解决</button></div>
-      <div class="escalation-box" hidden>
-        <strong>转人工前请补齐这些信息</strong>
-        <p>环境、账号或订单号、发生时间、页面名称和截图。</p>
-        <button class="copy-button" type="button">复制问题模板</button>
-      </div>
+async function askAi(question) {
+  const response = await fetch(AI_ENDPOINT, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ code: accessCode, question }),
+  });
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) throw new Error("AI service unavailable");
+  const result = await response.json();
+  if (!response.ok || !result.answer) throw new Error(result.error || "AI request failed");
+  return result;
+}
+
+function renderAnswerCard(message, question, result) {
+  message.querySelector(".answer-card").innerHTML = `
+    <div class="answer-level">◉ ${escapeHtml(result.level)}</div>
+    <p class="answer-text">${escapeHtml(result.answer)}</p>
+    ${result.needsContext ? `<div class="context-box"><strong>继续确认需要</strong>${escapeHtml(result.needsContext)}</div>` : ""}
+    ${result.sources?.length ? `<details><summary>查看依据</summary><ul>${result.sources.map((source) => `<li>${escapeHtml(source)}</li>`).join("")}</ul></details>` : ""}
+    ${result.related?.length ? `<div class="related-row"><span class="related-label">相关问题</span>${result.related.map((item) => `<button class="related-button" type="button">${escapeHtml(item)}</button>`).join("")}</div>` : ""}
+    <div class="feedback-row"><button class="feedback-button" type="button">没有解决</button></div>
+    <div class="escalation-box" hidden>
+      <strong>转人工前请补齐这些信息</strong>
+      <p>环境、账号或订单号、发生时间、页面名称和截图。</p>
+      <button class="copy-button" type="button">复制问题模板</button>
     </div>`;
-  conversation.appendChild(message);
   message.querySelectorAll(".related-button").forEach((button) => button.addEventListener("click", () => showAnswer(button.textContent.trim())));
   const escalation = message.querySelector(".escalation-box");
   message.querySelector(".feedback-button").addEventListener("click", () => {
@@ -276,7 +282,7 @@ function showAnswer(question) {
   });
   message.querySelector(".copy-button").addEventListener("click", async (event) => {
     const button = event.currentTarget;
-    const text = `维达助手未解决问题\n原问题：${question}\n助手匹配：${result.title || "未匹配"}\n环境：\n账号/订单号：\n发生时间：\n页面现象：`;
+    const text = `维达助手未解决问题\n原问题：${question}\n助手匹配：${result.matchedTitle || result.title || "未匹配"}\n环境：\n账号/订单号：\n发生时间：\n页面现象：`;
     try {
       await navigator.clipboard.writeText(text);
       button.textContent = "已复制，可以发给负责人";
@@ -284,6 +290,31 @@ function showAnswer(question) {
       button.textContent = "复制失败，请截屏反馈";
     }
   });
+}
+
+async function showAnswer(question) {
+  const welcome = document.querySelector("#welcome");
+  if (welcome) welcome.remove();
+  const conversation = document.querySelector("#conversation");
+  const message = document.createElement("article");
+  message.className = "message";
+  message.innerHTML = `
+    <div class="question-bubble">${escapeHtml(question)}</div>
+    <div class="answer-card">
+      <div class="answer-level">◉ AI 正在结合代码知识分析</div>
+      <p class="answer-text">正在查找相关代码结论，请稍候…</p>
+    </div>`;
+  conversation.appendChild(message);
+  requestAnimationFrame(() => window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }));
+
+  let result;
+  try {
+    result = await askAi(question);
+  } catch {
+    result = answerQuestion(question);
+    result.level = `${result.level} · AI 暂不可用`;
+  }
+  renderAnswerCard(message, question, result);
   requestAnimationFrame(() => window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }));
 }
 
