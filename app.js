@@ -221,11 +221,11 @@ function answerQuestion(question) {
   const second = ranked[1];
   if (!best || best.score < 14) {
     return {
-      answer: "目前没有定位到足够明确的知识条目。请补充业务域、环境、用户或单号和页面现象。",
+      answer: "目前没有定位到足够明确的系统规则，请补充业务模块和页面名称。具体账号、门店或单据异常不在助手查询范围，请转给负责人核查。",
       level: "待补充问题",
       sources: [],
       related: ranked.slice(0, 3).map((entry) => entry.item.title),
-      needsContext: "业务域、环境、用户或单号、发生时间、页面提示。",
+      needsContext: "业务模块、页面名称和页面提示。",
       matched: false,
       effectiveQuestion,
     };
