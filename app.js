@@ -141,7 +141,7 @@ function includesTerm(question, term) {
 
 function detectDomains(question) {
   const domains = new Set();
-  if (/OMS邀请码|返利确认函|对账函|季度物料|物料查询|经销商小程序|经销商门户小程序|收货确认|信用额度|超账期|满意度调查|首页红点/i.test(question)) domains.add("OMS经销商门户小程序");
+  if (/OMS邀请码|OMS接口|返利确认函|返利达成|合同坎级|对账函|季度物料|物料查询|物料订单|经销商小程序|经销商门户小程序|经销商角色|收货确认|信用额度|超账期|满意度调查|首页红点|首页最新信息|产品介绍|推广指引|新品发布|促销政策审批|物料订单后台|未读弹窗|阅读人数|消息下架|重新发布.*版本|公告.*OA|政策.*OA/i.test(question)) domains.add("OMS经销商门户小程序");
   if (/海外|台湾|韩国|erp|税码|收单地址|收货地址/i.test(question)) domains.add("海外App与海外订单");
   if (/订单管理|已处理|未处理|待业务员|销管|订单页签/.test(question) && !/海外|台湾|韩国/i.test(question)) domains.add("国内订单与订单管理");
   if (/拜访|路线|轨迹|进店|离店|未访|非拜访/.test(question)) domains.add("拜访计划路线轨迹与进离店");
