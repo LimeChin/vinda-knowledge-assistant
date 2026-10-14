@@ -283,11 +283,11 @@ async function startAiSession(code) {
     if (!response.ok || !result.token) throw new Error(result.error || "AI session failed");
     aiToken = result.token;
     const status = document.querySelector("#connection-status");
-    if (status) status.textContent = "AI + 代码知识库";
+    if (status) status.textContent = "AI + 项目知识库";
   } catch (error) {
     aiToken = "";
     const status = document.querySelector("#connection-status");
-    if (status) status.textContent = "代码知识库已连接 · AI 暂不可用";
+    if (status) status.textContent = "项目知识库已连接 · AI 暂不可用";
     throw error;
   }
 }
@@ -337,7 +337,7 @@ async function showAnswer(question) {
   message.innerHTML = `
     <div class="question-bubble">${escapeHtml(question)}</div>
     <div class="answer-card">
-      <div class="answer-level">◉ AI 正在结合代码知识分析</div>
+      <div class="answer-level">◉ AI 正在结合项目知识分析</div>
       <p class="answer-text">正在查找相关代码结论，请稍候…</p>
     </div>`;
   conversation.appendChild(message);
@@ -347,12 +347,12 @@ async function showAnswer(question) {
   try {
     result = await askAi(question);
     const status = document.querySelector("#connection-status");
-    if (status) status.textContent = "AI + 代码知识库";
+    if (status) status.textContent = "AI + 项目知识库";
   } catch {
     result = answerQuestion(question);
     result.level = `${result.level} · AI 暂不可用`;
     const status = document.querySelector("#connection-status");
-    if (status) status.textContent = "代码知识库已连接 · AI 暂不可用";
+    if (status) status.textContent = "项目知识库已连接 · AI 暂不可用";
   }
   renderAnswerCard(message, question, result);
   requestAnimationFrame(() => window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }));
