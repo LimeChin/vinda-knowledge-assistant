@@ -466,7 +466,56 @@ async function startAiSession(code) {
   }
 }
 
+async function fetchTicket(ticketId) {
+  if (aiSessionPromise) await aiSessionPromise;
+  if (!aiToken || !ticketId) throw new Error("no ticket");
+  const response = await fetch(`${AI_BASE_URL}/ticket/${encodeURIComponent(ticketId)}`, {
+    headers: { authorization: `Bearer ${aiToken}` },
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error || "ticket fetch failed");
+  return result;
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function pollOpsTicket(message, question, ticketId) {
+  const card = message.querySelector(".answer-card");
+  if (!card || !ticketId) return;
+  card.innerHTML = `
+    <div class="answer-level">◉ 已转维达运维助手</div>
+    <p class="answer-text">正在核查，请稍等片刻…（工单 ${escapeHtml(ticketId)}）</p>`;
+  const deadline = Date.now() + 3 * 60 * 1000;
+  while (Date.now() < deadline) {
+    await wait(2500);
+    try {
+      const ticket = await fetchTicket(ticketId);
+      if (ticket.status === "answered" && ticket.answer) {
+        renderAnswerCard(message, question, {
+          answer: ticket.answer,
+          level: ticket.level || "运维核查结论",
+          sources: [],
+          related: [],
+          ticketId,
+        });
+        return;
+      }
+    } catch {
+      /* keep polling */
+    }
+  }
+  card.innerHTML = `
+    <div class="answer-level">◉ 仍在核查</div>
+    <p class="answer-text">运维助手还在处理，请稍后刷新页面或再问一次。工单：${escapeHtml(ticketId)}</p>`;
+}
+
 function renderAnswerCard(message, question, result) {
+  if ((result.pending || result.level === "已转维达运维助手") && result.ticketId) {
+    pollOpsTicket(message, question, result.ticketId);
+    return;
+  }
   const businessAnswer = limitSentences(result.answer, 3);
   message.querySelector(".answer-card").innerHTML = `
     <div class="answer-level">◉ ${escapeHtml(result.level)}</div>
@@ -478,7 +527,7 @@ function renderAnswerCard(message, question, result) {
     <div class="feedback-row"><button class="feedback-button" type="button">没有解决</button></div>
     <div class="escalation-box" hidden>
       <strong>未解决时请补齐这些信息</strong>
-      <p>环境、账号或订单号、发生时间、页面名称和截图。未命中知识库时会转维达运维助手核查。</p>
+      <p>环境、账号或订单号、发生时间、页面名称和截图。未命中知识库时会转维达运维助手核查，结论会回到本对话框。</p>
       <button class="copy-button" type="button">复制问题模板</button>
     </div>`;
   message.querySelectorAll(".related-button").forEach((button) => button.addEventListener("click", () => showAnswer(button.textContent.trim())));
