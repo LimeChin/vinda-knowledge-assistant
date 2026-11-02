@@ -205,10 +205,87 @@ details ul { padding-left: 20px; line-height: 1.6; }
 }
 
 .composer { width: min(920px, 100%); margin: 0 auto; }
+.media-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.media-preview[hidden] { display: none; }
+.media-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #d0ddda;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .92);
+  color: #355553;
+  font-size: 12px;
+}
+.media-chip img {
+  width: 42px;
+  height: 42px;
+  object-fit: cover;
+  border-radius: 10px;
+  background: #e7f1ef;
+}
+.media-chip button {
+  border: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  background: #eef5f3;
+  color: #5d716f;
+}
 .input-row { display: flex; gap: 10px; padding: 8px; border: 1px solid #ceddda; border-radius: 20px; background: #fff; box-shadow: 0 12px 30px rgba(20, 68, 65, .12); }
+.attach-button {
+  width: 46px;
+  height: 46px;
+  align-self: flex-end;
+  display: grid;
+  place-items: center;
+  border: 1px solid #d2dfdd;
+  border-radius: 14px;
+  background: #f4faf8;
+  color: #08766f;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
 .question-input { flex: 1; min-width: 0; min-height: 46px; max-height: 120px; resize: none; border: 0; outline: 0; padding: 11px 10px; color: #122b2a; font-size: 16px; }
 .send-button { width: 46px; height: 46px; align-self: flex-end; border: 0; border-radius: 14px; background: #087d78; color: #fff; font-size: 20px; }
 .baseline { margin: 7px 0 0; text-align: center; color: #899795; font-size: 12px; }
+.question-media {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.question-media img {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, .35);
+}
+.phenomenon-box {
+  margin-top: 12px;
+  padding: 12px 13px;
+  border-radius: 12px;
+  background: #eef8f6;
+  color: #1d4f4b;
+  line-height: 1.6;
+}
+.phenomenon-box strong { display: block; margin-bottom: 4px; font-size: 13px; }
+.derived-question {
+  margin-top: 10px;
+  color: #607371;
+  font-size: 13px;
+  line-height: 1.5;
+}
 
 @media (max-width: 540px) {
   .unlock-card { padding: 28px 22px 24px; border-radius: 24px; }

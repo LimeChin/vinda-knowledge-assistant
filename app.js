@@ -103,8 +103,14 @@ function renderChat() {
       </div>
       <div class="composer-wrap">
         <form class="composer" id="question-form">
-          <div class="input-row"><textarea class="question-input" id="question" rows="1" placeholder="例如：为什么这个员工看不到今天的拜访计划？"></textarea><button class="send-button" id="send-button" type="submit" disabled aria-label="发送">↑</button></div>
-          <p class="baseline">${knowledgeItems.length} 条已蒸馏知识 · 重要操作请带环境与单号复核</p>
+          <div class="media-preview" id="media-preview" hidden></div>
+          <div class="input-row">
+            <label class="attach-button" for="media-input" title="上传图片或视频" aria-label="上传图片或视频">＋</label>
+            <input id="media-input" type="file" accept="image/jpeg,image/png,image/gif,image/webp,video/*" multiple hidden />
+            <textarea class="question-input" id="question" rows="1" placeholder="可上传截图/视频，或直接描述：为什么看不到今天的拜访计划？"></textarea>
+            <button class="send-button" id="send-button" type="submit" disabled aria-label="发送">↑</button>
+          </div>
+          <p class="baseline">${knowledgeItems.length} 条已蒸馏知识 · 支持图片/视频解析后自动问知识库</p>
         </form>
       </div>
     </section>`;
@@ -112,21 +118,74 @@ function renderChat() {
   const form = document.querySelector("#question-form");
   const input = document.querySelector("#question");
   const send = document.querySelector("#send-button");
-  const ask = (question) => {
-    input.value = "";
-    send.disabled = true;
-    showAnswer(question);
+  const mediaInput = document.querySelector("#media-input");
+  const mediaPreview = document.querySelector("#media-preview");
+  let pendingMedia = [];
+
+  const syncSendState = () => {
+    send.disabled = !(input.value.trim() || pendingMedia.length);
   };
-  input.addEventListener("input", () => { send.disabled = !input.value.trim(); });
+
+  const renderMediaPreview = () => {
+    if (!pendingMedia.length) {
+      mediaPreview.hidden = true;
+      mediaPreview.innerHTML = "";
+      syncSendState();
+      return;
+    }
+    mediaPreview.hidden = false;
+    mediaPreview.innerHTML = pendingMedia.map((item, index) => `
+      <div class="media-chip">
+        <img src="${item.previewUrl}" alt="附件预览" />
+        <span>${escapeHtml(item.label)}</span>
+        <button type="button" data-remove="${index}" aria-label="移除附件">×</button>
+      </div>`).join("");
+    mediaPreview.querySelectorAll("[data-remove]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const index = Number(button.getAttribute("data-remove"));
+        const [removed] = pendingMedia.splice(index, 1);
+        if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+        renderMediaPreview();
+      });
+    });
+    syncSendState();
+  };
+
+  const ask = (question, media = []) => {
+    input.value = "";
+    pendingMedia.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl));
+    pendingMedia = [];
+    renderMediaPreview();
+    send.disabled = true;
+    showAnswer(question, media);
+  };
+
+  mediaInput.addEventListener("change", async () => {
+    const files = [...(mediaInput.files || [])];
+    mediaInput.value = "";
+    for (const file of files) {
+      if (pendingMedia.length >= 4) break;
+      try {
+        const prepared = await prepareMediaFile(file);
+        pendingMedia.push(...prepared);
+      } catch (error) {
+        const status = document.querySelector("#connection-status");
+        if (status) status.textContent = error.message || "附件处理失败";
+      }
+    }
+    renderMediaPreview();
+  });
+
+  input.addEventListener("input", syncSendState);
   input.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      if (input.value.trim()) ask(input.value.trim());
+      if (input.value.trim() || pendingMedia.length) ask(input.value.trim(), [...pendingMedia]);
     }
   });
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    if (input.value.trim()) ask(input.value.trim());
+    if (input.value.trim() || pendingMedia.length) ask(input.value.trim(), [...pendingMedia]);
   });
   document.querySelectorAll(".starter").forEach((button) => button.addEventListener("click", () => ask(button.textContent.trim())));
 }
@@ -222,8 +281,8 @@ function answerQuestion(question) {
   const second = ranked[1];
   if (!best || best.score < 14) {
     return {
-      answer: "目前没有定位到足够明确的系统规则，请补充业务模块和页面名称。具体账号、门店或单据异常不在助手查询范围，请转给负责人核查。",
-      level: "待补充问题",
+      answer: "这个问题知识库里没有直接结论。我去维达运维助手里查一下，请稍等片刻。",
+      level: "已转维达运维助手",
       sources: [],
       related: ranked.slice(0, 3).map((entry) => entry.item.title),
       needsContext: "业务模块、页面名称和页面提示。",
@@ -270,6 +329,121 @@ async function askAi(question) {
   return result;
 }
 
+async function askAiWithMedia(note, mediaItems) {
+  if (aiSessionPromise) await aiSessionPromise;
+  if (!aiToken) throw new Error("AI session unavailable");
+  const images = mediaItems.map((item) => ({
+    mimeType: item.mimeType,
+    dataBase64: item.dataBase64,
+  }));
+  const response = await fetch(`${AI_BASE_URL}/ask-media`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${aiToken}`,
+    },
+    body: JSON.stringify({ note, images }),
+  });
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) throw new Error("AI service unavailable");
+  const result = await response.json();
+  if (!response.ok || !result.answer) throw new Error(result.error || "媒体解析失败");
+  return result;
+}
+
+function canvasToJpegBase64(canvas, quality = 0.72) {
+  const dataUrl = canvas.toDataURL("image/jpeg", quality);
+  const match = dataUrl.match(/^data:(image\/jpeg);base64,(.+)$/);
+  if (!match) throw new Error("图片压缩失败");
+  return { mimeType: match[1], dataBase64: match[2], previewUrl: dataUrl };
+}
+
+async function compressImageFile(file, maxEdge = 1280) {
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = await new Promise((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = () => reject(new Error("无法读取图片"));
+      element.src = objectUrl;
+    });
+    const scale = Math.min(1, maxEdge / Math.max(image.width, image.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(image.width * scale));
+    canvas.height = Math.max(1, Math.round(image.height * scale));
+    const context = canvas.getContext("2d");
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const compressed = canvasToJpegBase64(canvas);
+    return [{
+      ...compressed,
+      label: file.name || "图片",
+      sourceType: "image",
+    }];
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+async function extractVideoFrames(file, frameCount = 3) {
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const video = document.createElement("video");
+    video.preload = "auto";
+    video.muted = true;
+    video.playsInline = true;
+    video.src = objectUrl;
+    await new Promise((resolve, reject) => {
+      video.onloadedmetadata = () => resolve();
+      video.onerror = () => reject(new Error("无法读取视频"));
+    });
+    const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 1;
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    const frames = [];
+    for (let index = 0; index < frameCount; index += 1) {
+      const at = duration * ((index + 1) / (frameCount + 1));
+      await new Promise((resolve, reject) => {
+        const onSeeked = () => {
+          video.removeEventListener("seeked", onSeeked);
+          resolve();
+        };
+        video.addEventListener("seeked", onSeeked);
+        try {
+          video.currentTime = Math.min(duration - 0.05, Math.max(0.05, at));
+        } catch (error) {
+          video.removeEventListener("seeked", onSeeked);
+          reject(error);
+        }
+      });
+      const scale = Math.min(1, 1280 / Math.max(video.videoWidth || 1, video.videoHeight || 1));
+      canvas.width = Math.max(1, Math.round((video.videoWidth || 640) * scale));
+      canvas.height = Math.max(1, Math.round((video.videoHeight || 360) * scale));
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const frame = canvasToJpegBase64(canvas);
+      frames.push({
+        ...frame,
+        label: `${file.name || "视频"} · 帧${index + 1}`,
+        sourceType: "video-frame",
+      });
+    }
+    return frames;
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+async function prepareMediaFile(file) {
+  if (file.type.startsWith("image/")) {
+    if (file.size > 12 * 1024 * 1024) throw new Error("单张图片请小于 12MB");
+    return compressImageFile(file);
+  }
+  if (file.type.startsWith("video/")) {
+    if (file.size > 80 * 1024 * 1024) throw new Error("单个视频请小于 80MB");
+    return extractVideoFrames(file);
+  }
+  throw new Error("仅支持图片或视频");
+}
+
 async function startAiSession(code) {
   try {
     const response = await fetch(`${AI_BASE_URL}/session`, {
@@ -296,13 +470,15 @@ function renderAnswerCard(message, question, result) {
   const businessAnswer = limitSentences(result.answer, 3);
   message.querySelector(".answer-card").innerHTML = `
     <div class="answer-level">◉ ${escapeHtml(result.level)}</div>
+    ${result.phenomenon ? `<div class="phenomenon-box"><strong>AI 识别到的现象</strong>${escapeHtml(result.phenomenon)}</div>` : ""}
+    ${result.derivedQuestion ? `<div class="derived-question">转问知识库：${escapeHtml(result.derivedQuestion)}</div>` : ""}
     <p class="answer-text">${escapeHtml(businessAnswer)}</p>
     ${result.needsContext ? `<div class="context-box"><strong>继续确认需要</strong>${escapeHtml(result.needsContext)}</div>` : ""}
     ${result.related?.length ? `<div class="related-row"><span class="related-label">相关问题</span>${result.related.map((item) => `<button class="related-button" type="button">${escapeHtml(item)}</button>`).join("")}</div>` : ""}
     <div class="feedback-row"><button class="feedback-button" type="button">没有解决</button></div>
     <div class="escalation-box" hidden>
-      <strong>转人工前请补齐这些信息</strong>
-      <p>环境、账号或订单号、发生时间、页面名称和截图。</p>
+      <strong>未解决时请补齐这些信息</strong>
+      <p>环境、账号或订单号、发生时间、页面名称和截图。未命中知识库时会转维达运维助手核查。</p>
       <button class="copy-button" type="button">复制问题模板</button>
     </div>`;
   message.querySelectorAll(".related-button").forEach((button) => button.addEventListener("click", () => showAnswer(button.textContent.trim())));
@@ -312,7 +488,7 @@ function renderAnswerCard(message, question, result) {
   });
   message.querySelector(".copy-button").addEventListener("click", async (event) => {
     const button = event.currentTarget;
-    const text = `维达助手未解决问题\n原问题：${question}\n助手匹配：${result.matchedTitle || result.title || "未匹配"}\n环境：\n账号/订单号：\n发生时间：\n页面现象：`;
+    const text = `维达助手未解决问题\n原问题：${question}\n现象描述：${result.phenomenon || ""}\n派生问题：${result.derivedQuestion || ""}\n助手匹配：${result.matchedTitle || result.title || "未匹配"}\n环境：\n账号/订单号：\n发生时间：\n页面现象：`;
     try {
       await navigator.clipboard.writeText(text);
       button.textContent = "已复制，可以发给负责人";
@@ -328,33 +504,48 @@ function limitSentences(value, limit) {
   return sentences.slice(0, limit).join("").trim() || normalized;
 }
 
-async function showAnswer(question) {
+async function showAnswer(question, mediaItems = []) {
   const welcome = document.querySelector("#welcome");
   if (welcome) welcome.remove();
   const conversation = document.querySelector("#conversation");
   const message = document.createElement("article");
   message.className = "message";
+  const displayQuestion = question || (mediaItems.length ? "（已上传截图/视频，请根据现象分析）" : "");
+  const mediaHtml = mediaItems.length
+    ? `<div class="question-media">${mediaItems.slice(0, 4).map((item) => `<img src="${item.previewUrl || `data:${item.mimeType};base64,${item.dataBase64}`}" alt="${escapeHtml(item.label || "附件")}" />`).join("")}</div>`
+    : "";
   message.innerHTML = `
-    <div class="question-bubble">${escapeHtml(question)}</div>
+    <div class="question-bubble">${escapeHtml(displayQuestion)}${mediaHtml}</div>
     <div class="answer-card">
-      <div class="answer-level">◉ AI 正在结合项目知识分析</div>
-      <p class="answer-text">正在查找相关代码结论，请稍候…</p>
+      <div class="answer-level">◉ ${mediaItems.length ? "AI 正在解析图片/视频现象" : "AI 正在结合项目知识分析"}</div>
+      <p class="answer-text">${mediaItems.length ? "先描述页面现象，再发给知识库助手，请稍候…" : "正在查找相关代码结论，请稍候…"}</p>
     </div>`;
   conversation.appendChild(message);
   requestAnimationFrame(() => window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }));
 
   let result;
   try {
-    result = await askAi(question);
+    result = mediaItems.length
+      ? await askAiWithMedia(question, mediaItems)
+      : await askAi(question);
     const status = document.querySelector("#connection-status");
     if (status) status.textContent = "AI + 项目知识库";
-  } catch {
-    result = answerQuestion(question);
-    result.level = `${result.level} · AI 暂不可用`;
+  } catch (error) {
+    if (mediaItems.length) {
+      result = {
+        answer: error?.message || "图片/视频解析失败，请改用文字描述，或稍后重试。",
+        level: "媒体解析失败",
+        sources: [],
+        related: [],
+      };
+    } else {
+      result = answerQuestion(question);
+      result.level = `${result.level} · AI 暂不可用`;
+    }
     const status = document.querySelector("#connection-status");
-    if (status) status.textContent = "项目知识库已连接 · AI 暂不可用";
+    if (status) status.textContent = mediaItems.length ? "媒体解析异常" : "项目知识库已连接 · AI 暂不可用";
   }
-  renderAnswerCard(message, question, result);
+  renderAnswerCard(message, displayQuestion, result);
   requestAnimationFrame(() => window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }));
 }
 
