@@ -188,6 +188,7 @@ function renderChat() {
     if (input.value.trim() || pendingMedia.length) ask(input.value.trim(), [...pendingMedia]);
   });
   document.querySelectorAll(".starter").forEach((button) => button.addEventListener("click", () => ask(button.textContent.trim())));
+  resumePendingTickets();
 }
 
 function normalize(value) {
@@ -504,18 +505,87 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const PENDING_KEY = "vinda-ops-pending";
+
+function readPending() {
+  try {
+    const parsed = JSON.parse(sessionStorage.getItem(PENDING_KEY) || "[]");
+    if (!Array.isArray(parsed)) return [];
+    const freshAfter = Date.now() - 24 * 60 * 60 * 1000;
+    return parsed.filter((item) => item?.ticketId && item?.question && Number(item.at) > freshAfter);
+  } catch {
+    return [];
+  }
+}
+
+function writePending(list) {
+  try {
+    sessionStorage.setItem(PENDING_KEY, JSON.stringify(list.slice(-8)));
+  } catch {
+    /* private mode can reject storage */
+  }
+}
+
+function rememberPending(ticketId, question) {
+  const list = readPending().filter((item) => item.ticketId !== ticketId);
+  list.push({ ticketId, question: String(question || "").slice(0, 500), at: Date.now() });
+  writePending(list);
+}
+
+function forgetPending(ticketId) {
+  writePending(readPending().filter((item) => item.ticketId !== ticketId));
+}
+
+function pauseWhileHidden() {
+  if (!document.hidden) return Promise.resolve();
+  return new Promise((resolve) => {
+    const onShow = () => {
+      if (document.hidden) return;
+      document.removeEventListener("visibilitychange", onShow);
+      resolve();
+    };
+    document.addEventListener("visibilitychange", onShow);
+  });
+}
+
+async function waitForTicket(ticketId) {
+  if (aiSessionPromise) await aiSessionPromise;
+  if (!aiToken || !ticketId) throw new Error("no ticket");
+  const response = await fetch(`${AI_BASE_URL}/ticket/${encodeURIComponent(ticketId)}/wait`, {
+    headers: { authorization: `Bearer ${aiToken}` },
+  });
+  const result = await response.json().catch(() => ({}));
+  if (response.status === 404 && result.error === "Not found") {
+    await wait(2500);
+    return fetchTicket(ticketId);
+  }
+  if (!response.ok) throw new Error(result.error || "ticket fetch failed");
+  return result;
+}
+
+function showOpsWaiting(message, ticketId) {
+  const card = message.querySelector(".answer-card");
+  if (!card) return;
+  card.innerHTML = `
+    <div class="answer-level">◉ 已转维达运维助手</div>
+    <p class="answer-text">已发出，回复会直接出现在这张卡片里。（工单 ${escapeHtml(ticketId)}）</p>`;
+}
+
 async function pollOpsTicket(message, question, ticketId) {
   const card = message.querySelector(".answer-card");
   if (!card || !ticketId) return;
-  card.innerHTML = `
-    <div class="answer-level">◉ 已转维达运维助手</div>
-    <p class="answer-text">正在核查，请稍等片刻…（工单 ${escapeHtml(ticketId)}）</p>`;
-  const deadline = Date.now() + 3 * 60 * 1000;
-  while (Date.now() < deadline) {
-    await wait(2500);
+  const generation = (Number(message.dataset.opsGen) || 0) + 1;
+  message.dataset.opsGen = String(generation);
+  rememberPending(ticketId, question);
+  showOpsWaiting(message, ticketId);
+  while (message.dataset.opsGen === String(generation)) {
+    await pauseWhileHidden();
+    if (message.dataset.opsGen !== String(generation)) return;
     try {
-      const ticket = await fetchTicket(ticketId);
+      const ticket = await waitForTicket(ticketId);
+      if (message.dataset.opsGen !== String(generation)) return;
       if (ticket.status === "answered" && ticket.answer) {
+        forgetPending(ticketId);
         renderAnswerCard(message, question, {
           answer: ticket.answer,
           level: ticket.level || "运维核查结论",
@@ -525,13 +595,34 @@ async function pollOpsTicket(message, question, ticketId) {
         });
         return;
       }
-    } catch {
-      /* keep polling */
+    } catch (error) {
+      if (String(error?.message || "").includes("不存在")) {
+        forgetPending(ticketId);
+        card.innerHTML = `
+          <div class="answer-level">◉ 工单已失效</div>
+          <p class="answer-text">${escapeHtml(error.message)}（工单 ${escapeHtml(ticketId)}）</p>`;
+        return;
+      }
+      await wait(2000);
     }
   }
-  card.innerHTML = `
-    <div class="answer-level">◉ 仍在核查</div>
-    <p class="answer-text">运维助手还在处理，请稍后刷新页面或再问一次。工单：${escapeHtml(ticketId)}</p>`;
+}
+
+function resumePendingTickets() {
+  const pending = readPending();
+  if (!pending.length) return;
+  const welcome = document.querySelector("#welcome");
+  if (welcome) welcome.remove();
+  const conversation = document.querySelector("#conversation");
+  for (const item of pending) {
+    const message = document.createElement("article");
+    message.className = "message";
+    message.innerHTML = `
+      <div class="question-bubble">${escapeHtml(item.question)}</div>
+      <div class="answer-card"></div>`;
+    conversation.appendChild(message);
+    pollOpsTicket(message, item.question, item.ticketId);
+  }
 }
 
 function renderAnswerCard(message, question, result) {
