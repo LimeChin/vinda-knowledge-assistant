@@ -466,6 +466,29 @@ async function startAiSession(code) {
   }
 }
 
+async function requestOpsLookup(question, result) {
+  if (aiSessionPromise) await aiSessionPromise;
+  if (!aiToken) throw new Error("登录已失效，请重新输入邀请码");
+  const response = await fetch(`${AI_BASE_URL}/escalate`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${aiToken}`,
+    },
+    body: JSON.stringify({
+      question,
+      priorAnswer: result.answer || "",
+      phenomenon: result.phenomenon || "",
+      derivedQuestion: result.derivedQuestion || "",
+    }),
+  });
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) throw new Error("运维助手暂未接通");
+  const payload = await response.json();
+  if (!response.ok || !payload.ticketId) throw new Error(payload.error || "运维助手暂未接通，请稍后再试");
+  return payload;
+}
+
 async function fetchTicket(ticketId) {
   if (aiSessionPromise) await aiSessionPromise;
   if (!aiToken || !ticketId) throw new Error("no ticket");
@@ -524,7 +547,11 @@ function renderAnswerCard(message, question, result) {
     <p class="answer-text">${escapeHtml(businessAnswer)}</p>
     ${result.needsContext ? `<div class="context-box"><strong>继续确认需要</strong>${escapeHtml(result.needsContext)}</div>` : ""}
     ${result.related?.length ? `<div class="related-row"><span class="related-label">相关问题</span>${result.related.map((item) => `<button class="related-button" type="button">${escapeHtml(item)}</button>`).join("")}</div>` : ""}
-    <div class="feedback-row"><button class="feedback-button" type="button">没有解决</button></div>
+    <div class="feedback-row">
+      <button class="feedback-button" type="button">没有解决</button>
+      <button class="ops-button" type="button">调用运维助手去查</button>
+      <p class="ops-error"></p>
+    </div>
     <div class="escalation-box" hidden>
       <strong>未解决时请补齐这些信息</strong>
       <p>环境、账号或订单号、发生时间、页面名称和截图。未命中知识库时会转维达运维助手核查，结论会回到本对话框。</p>
@@ -534,6 +561,21 @@ function renderAnswerCard(message, question, result) {
   const escalation = message.querySelector(".escalation-box");
   message.querySelector(".feedback-button").addEventListener("click", () => {
     escalation.hidden = !escalation.hidden;
+  });
+  const opsButton = message.querySelector(".ops-button");
+  const opsError = message.querySelector(".ops-error");
+  opsButton.addEventListener("click", async () => {
+    opsError.textContent = "";
+    opsButton.disabled = true;
+    opsButton.textContent = "正在转给运维助手…";
+    try {
+      const escalated = await requestOpsLookup(question, result);
+      pollOpsTicket(message, question, escalated.ticketId);
+    } catch (error) {
+      opsButton.disabled = false;
+      opsButton.textContent = "调用运维助手去查";
+      opsError.textContent = error?.message || "调用失败，请稍后再试";
+    }
   });
   message.querySelector(".copy-button").addEventListener("click", async (event) => {
     const button = event.currentTarget;
