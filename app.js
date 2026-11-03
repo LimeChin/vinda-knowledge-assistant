@@ -15,7 +15,31 @@ let conversationContext = {
   lastQuestion: "",
   lastDomain: "",
   lastTitle: "",
+  lastAnswer: "",
 };
+let chatHistory = [];
+
+function rememberChatTurn(question, answer) {
+  const cleanQuestion = String(question || "").trim().slice(0, 300);
+  const cleanAnswer = String(answer || "").trim().slice(0, 400);
+  if (!cleanQuestion || !cleanAnswer) return;
+  chatHistory = [...chatHistory.filter((turn) => turn.question !== cleanQuestion), {
+    question: cleanQuestion,
+    answer: cleanAnswer,
+  }].slice(-4);
+  conversationContext = {
+    ...conversationContext,
+    lastQuestion: cleanQuestion,
+    lastAnswer: cleanAnswer,
+  };
+}
+
+function historyPayload() {
+  return chatHistory.slice(-4).map((turn) => ({
+    question: turn.question,
+    answer: turn.answer,
+  }));
+}
 
 const escapeHtml = (value = "") => String(value).replace(/[&<>"']/g, (char) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;",
@@ -272,7 +296,7 @@ function score(question, item) {
 
 function answerQuestion(question) {
   const effectiveQuestion = isFollowUp(question) && conversationContext.lastQuestion
-    ? `${conversationContext.lastQuestion} ${conversationContext.lastDomain} ${conversationContext.lastTitle} ${question}`
+    ? `${conversationContext.lastQuestion} ${conversationContext.lastAnswer} ${conversationContext.lastDomain} ${conversationContext.lastTitle} ${question}`
     : question;
   const ranked = knowledgeItems
     .map((item) => ({ item, score: score(effectiveQuestion, item) }))
@@ -308,6 +332,7 @@ function answerQuestion(question) {
     lastQuestion: question,
     lastDomain: best.item.domain || "",
     lastTitle: best.item.title,
+    lastAnswer: best.item.answer || "",
   };
   return { ...best.item, related, matched: true, score: best.score, effectiveQuestion };
 }
@@ -321,7 +346,7 @@ async function askAi(question) {
       "content-type": "application/json",
       authorization: `Bearer ${aiToken}`,
     },
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({ question, history: historyPayload() }),
   });
   const contentType = response.headers.get("content-type") || "";
   if (!contentType.includes("application/json")) throw new Error("AI service unavailable");
@@ -343,7 +368,7 @@ async function askAiWithMedia(note, mediaItems) {
       "content-type": "application/json",
       authorization: `Bearer ${aiToken}`,
     },
-    body: JSON.stringify({ note, images }),
+    body: JSON.stringify({ note, images, history: historyPayload() }),
   });
   const contentType = response.headers.get("content-type") || "";
   if (!contentType.includes("application/json")) throw new Error("AI service unavailable");
@@ -480,7 +505,8 @@ async function requestOpsLookup(question, result) {
       question,
       priorAnswer: result.answer || "",
       phenomenon: result.phenomenon || "",
-      derivedQuestion: result.derivedQuestion || "",
+      derivedQuestion: result.derivedQuestion || result.searchQuestion || "",
+      history: historyPayload(),
     }),
   });
   const contentType = response.headers.get("content-type") || "";
@@ -586,6 +612,7 @@ async function pollOpsTicket(message, question, ticketId) {
       if (message.dataset.opsGen !== String(generation)) return;
       if (ticket.status === "answered" && ticket.answer) {
         forgetPending(ticketId);
+        rememberChatTurn(question, ticket.answer);
         renderAnswerCard(message, question, {
           answer: ticket.answer,
           level: ticket.level || "运维核查结论",
@@ -630,11 +657,20 @@ function renderAnswerCard(message, question, result) {
     pollOpsTicket(message, question, result.ticketId);
     return;
   }
+  if (result.answer && result.level !== "已转维达运维助手" && !result.pending) {
+    rememberChatTurn(question, result.answer);
+  }
   const businessAnswer = limitSentences(result.answer, 3);
+  const followupHint = result.searchQuestion
+    && result.searchQuestion !== question
+    && result.searchQuestion !== result.derivedQuestion
+    ? result.searchQuestion
+    : "";
   message.querySelector(".answer-card").innerHTML = `
     <div class="answer-level">◉ ${escapeHtml(result.level)}</div>
     ${result.phenomenon ? `<div class="phenomenon-box"><strong>AI 识别到的现象</strong>${escapeHtml(result.phenomenon)}</div>` : ""}
     ${result.derivedQuestion ? `<div class="derived-question">转问知识库：${escapeHtml(result.derivedQuestion)}</div>` : ""}
+    ${followupHint ? `<div class="derived-question">结合上文理解为：${escapeHtml(followupHint)}</div>` : ""}
     <p class="answer-text">${escapeHtml(businessAnswer)}</p>
     ${result.needsContext ? `<div class="context-box"><strong>继续确认需要</strong>${escapeHtml(result.needsContext)}</div>` : ""}
     ${result.related?.length ? `<div class="related-row"><span class="related-label">相关问题</span>${result.related.map((item) => `<button class="related-button" type="button">${escapeHtml(item)}</button>`).join("")}</div>` : ""}
